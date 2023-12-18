@@ -104,10 +104,10 @@ function VideoCall() {
 
   return (
     <div>
-      <div className="flex flex-row h-full w-full justify-center gap-[15%] h-screen z-">
+      <div className="flex flex-row h-full w-full justify-center gap-[15%] z-">
         <div>
           <div className="flex-grow flex flex-col items-center justify-center h-[90%]">
-            <span className="text-white font-bold text-3xl mb-4">Basic React JS video calling</span>
+            <span className="text-red-500 font-bold text-3xl mb-4">Basic React JS video calling</span>
             <span className="text-white font-bold text-md mb-4 text-center underline">
               Copy your ID and anyone using the same server can use it to call you and vice versa!
             </span>
