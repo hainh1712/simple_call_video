@@ -1,219 +1,257 @@
 import Header from "./Header";
-import { useAuth } from "../contexts/AuthContext";
-import React, { useEffect, useRef, useState } from "react";
-import Peer from "simple-peer";
-import { io } from "socket.io-client";
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import './VideoCall.css'
 
-const socket = io("http://localhost:5000");
-
-function VideoCall() {
-  const authInfo = useAuth();
-  const { user } = authInfo;
-  const [me, setMe] = useState("");
-  const [stream, setStream] = useState(null);
-  const [receivingCall, setReceivingCall] = useState(false);
-  const [caller, setCaller] = useState("");
-  const [callerSignal, setCallerSignal] = useState(null);
-  const [callAccepted, setCallAccepted] = useState(false);
-  const [idToCall, setIdToCall] = useState("");
-  const [callEnded, setCallEnded] = useState(false);
-  const [name, setName] = useState("");
-
-  const userVideo = useRef(null);
-  const connectionRef = useRef(null);
-  const myVideo = useRef(null);
+const VideoCall = () => {
+  const videoPeerRef = useRef(null);
+  const videoSelfRef = useRef(null);
+  const loaderRef = useRef(null);
+  const wsRef = useRef(null);
+  const pcRef = useRef(null);
+  const lsRef = useRef(null);
+  const nextButtonRef = useRef(null);
+  const startButtonRef = useRef(null);
+  const stopButtonRef = useRef(null);
+  
 
   useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then((stream) => {
-        setStream(stream);
-        if (myVideo.current) {
-          myVideo.current.srcObject = stream;
-        }
-      })
-      .catch((error) => {
-        console.error("Error accessing media devices:", error);
-      });
-
-    socket.on("me", (id) => {
-      setMe(id);
+    videoPeerRef.current.addEventListener('play', () => {
+      loaderRef.current.style.display = 'none';
     });
-
-    socket.on("callUser", (data) => {
-      setReceivingCall(true);
-      setCaller(data.from);
-      setName(data.name);
-      setCallerSignal(data.signal);
-    });
+    nextButtonRef.current.disabled = true; 
+    startButtonRef.current.disabled = false; 
+    stopButtonRef.current.disabled = true;
   }, []);
 
-  const callUser = (id) => {
-    const peer = new Peer({
-      initiator: true,
-      trickle: false,
-      stream: stream,
-    });
+  useEffect(() => {
+    wsRef.current = new WebSocket('ws://localhost:8080');
 
-    peer.on("signal", (data) => {
-      socket.emit("callUser", {
-        userToCall: id,
-        signalData: data,
-        from: me,
-        name: name,
+    wsRef.current.init = function () {
+      this.channels = new Map();
+      this.addEventListener('message', (message) => {
+        const { channel, data } = JSON.parse(message.data.toString());
+        this.propagate(channel, data);
       });
-    });
+    };
 
-    peer.on("stream", (stream) => {
-      if (userVideo.current) {
-        userVideo.current.srcObject = stream;
+    wsRef.current.emit = function (channel, data) {
+      this.send(JSON.stringify({ channel, data }));
+    };
+
+    wsRef.current.register = function (channel, callback) {
+      this.channels.set(channel, callback);
+    };
+
+    wsRef.current.propagate = function (channel, data) {
+      const callback = this.channels.get(channel);
+      if (!callback) return;
+      callback(data);
+    };
+
+    return () => {
+      wsRef.current.close();
+    };
+  }, []);
+
+  const initializeConnection = useCallback(async () => {
+    const iceConfig = {
+      iceServers: [
+        {
+          urls: [
+            'stun:stun.l.google.com:19302',
+            'stun:stun1.l.google.com:19302',
+            'stun:stun2.l.google.com:19302',
+            'stun:stun3.l.google.com:19302',
+            'stun:stun4.l.google.com:19302',
+          ],
+        },
+      ],
+    };
+
+    pcRef.current = new RTCPeerConnection(iceConfig);
+    pcRef.current.sentDescription = false;
+
+    pcRef.current.onicecandidate = (e) => {
+      if (!e.candidate) return;
+
+      if (!pcRef.current.sentRemoteDescription) {
+        pcRef.current.sentRemoteDescription = true;
+        wsRef.current.emit('description', pcRef.current.localDescription);
       }
-    });
+      wsRef.current.emit('iceCandidate', e.candidate);
+    };
 
-    socket.on("callAccepted", (signal) => {
-      setCallAccepted(true);
-      peer.signal(signal);
-    });
-
-    connectionRef.current = peer;
-  };
-
-  const answerCall = () => {
-    setCallAccepted(true);
-    const peer = new Peer({
-      initiator: false,
-      trickle: false,
-      stream: stream,
-    });
-
-    peer.on("signal", (data) => {
-      socket.emit("answerCall", { signal: data, to: caller });
-    });
-
-    peer.on("stream", (stream) => {
-      if (userVideo.current) {
-        userVideo.current.srcObject = stream;
+    pcRef.current.oniceconnectionstatechange = async function () {
+      if (
+        pcRef.current.iceConnectionState === 'disconnected' ||
+        pcRef.current.iceConnectionState === 'closed'
+      ) {
+        console.log(pcRef.current.iceConnectionState);
+        pcRef.current.close();
+        initializeConnection();
       }
+    };
+
+    const rs = new MediaStream();
+
+    videoPeerRef.current.srcObject = rs;
+    loaderRef.current.style.display = 'inline-block'; // show loader
+
+    lsRef.current.getTracks().forEach((track) => {
+      console.log('adding tracks');
+      pcRef.current.addTrack(track, lsRef.current);
     });
 
-    peer.signal(callerSignal);
-    connectionRef.current = peer;
-  };
+    pcRef.current.ontrack = (event) => {
+      console.log('received track');
+      event.streams[0].getTracks().forEach((track) => {
+        rs.addTrack(track);
+      });
+    };
 
-  const leaveCall = () => {
-    setCallEnded(true);
-    // if (connectionRef.current) {
-    //   connectionRef.current.destroy();
-    // }
-  };
+    await new Promise(r => setTimeout(r, 2000));
+    // wsRef.current.emit('peopleOnline');
+    wsRef.current.emit('match');
+  });
 
-  return (
-    <div className="h-screen w-screen bg-gray-100">
-      <Header />
-      <div className="flex-grow flex flex-col items-center justify-center w-4/5 mx-auto">
-        <div className="flex flex-row gap-32">
-          <div className="flex flex-col items-center justify-center w-full">
-            <div className="video">
-              {stream && (
-                <video
-                  className="rounded-lg w-full h-full"
-                  playsInline
-                  muted
-                  ref={myVideo}
-                  autoPlay
-                  // style={{ width: "300px", height: "300px" }}
-                />
-              )}
+  useEffect(() => {
+    const handleWebSocketOpen = async () => {
+      wsRef.current.init();
+
+      wsRef.current.register('begin', async () => {
+        const offer = await pcRef.current.createOffer();
+        pcRef.current.setLocalDescription(offer);
+        // signalRemotePeer({ description: pcRef.localDescription });
+      });
+
+      wsRef.current.register('iceCandidate', async (data) => {
+        pcRef.current.addIceCandidate(data);
+      });
+
+      wsRef.current.register('description', async (data) => {
+        await pcRef.current.setRemoteDescription(data);
+        if (!pcRef.current.localDescription) {
+          const answer = await pcRef.current.createAnswer();
+          await pcRef.current.setLocalDescription(answer);
+        }
+      });
+
+      wsRef.current.register('disconnect', async () => {
+        console.log('received disconnect request');
+        pcRef.current.close();
+        initializeConnection();
+      });
+
+      try {
+        lsRef.current = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
+      } catch (e) {
+          alert('This website needs video and audio permission to work correctly');
+        }
+        videoSelfRef.current.srcObject = lsRef.current;
+        loaderRef.current.style.display = 'none';
+        // await initializeConnection();
+      };
+
+      wsRef.current.addEventListener('open', handleWebSocketOpen);
+
+      return () => {
+        if (pcRef.current && wsRef.current) {
+          wsRef.current.close();
+          pcRef.current.close();
+        }
+      };
+    }, [initializeConnection]);
+
+    const stopConnection = () => {
+      if (pcRef.current && wsRef.current) {
+        wsRef.current.emit("disconnect");
+        pcRef.current.close();
+        loaderRef.current.style.display = 'none';
+      }
+    };
+
+    const skipConnection = async () => {
+      if (pcRef.current && wsRef.current) {
+        wsRef.current.emit("disconnect");
+        pcRef.current.close();
+        await initializeConnection();
+      }
+    }
+
+    const startConnection = async () => {
+      await initializeConnection();
+    } 
+
+    const handleNext = async () => {
+      nextButtonRef.current.disabled = false; 
+      startButtonRef.current.disabled = true; 
+      stopButtonRef.current.disabled = false;
+      await skipConnection()
+    }
+
+    const handleStart = async () => {
+      nextButtonRef.current.disabled = false; 
+      startButtonRef.current.disabled = true; 
+      stopButtonRef.current.disabled = false;
+      await startConnection()
+    }
+
+    const handleStop = () => {
+      nextButtonRef.current.disabled = true; 
+      startButtonRef.current.disabled = false; 
+      stopButtonRef.current.disabled = true;
+      stopConnection()
+    }
+
+    return (
+      <div className="h-screen w-screen bg-gray-100">
+        <Header/>
+        <div id="main">
+          <div id="top-bar">
+            <div id="top-right">
+              <div id="peopleOnline">
+              </div>
             </div>
-            {/* <span className="text-red-500 font-bold text-lg mb-4">{caller}</span> */}
-            {/* <div className="info-person1 flex items-center justify-center my-2">
-              <div className="mr-2">
-                <img src={user?.avatar_url ? user.avatar_url : "/social-media.png"} alt="icon" width={36} height={36}></img>
-              </div>
-              <div>
-                <span>{user.name}</span><br/>
-                <span>Lớp: {user.classname} - {user.grade}</span>
-              </div> 
-            </div> */}
-            <p className="text-red-500">{me}</p>
           </div>
-
-          <div className="flex flex-col items-center justify-center w-full">
-            {callAccepted && !callEnded ? (
-              <>
-                <video
-                  className="rounded-lg w-full h-full"
-                  playsInline
-                  ref={userVideo}
-                  autoPlay
-                  // style={{ width: "300px", height: "300px" }}
-                />
-                {/* <div className="info-person2 flex items-center justify-center my-2">
-                  <div className="mr-2">
-                    <img src={user?.avatar_url ? user.avatar_url : "/social-media.png"} alt="icon" width={36} height={36}></img>
-                  </div>
-                  <div>
-                    <span>{user.name}</span><br/>
-                    <span>Lớp: {user.classname} - {user.grade}</span>
-                  </div> 
-                </div> */}
-                <span className="text-red-500 font-bold text-lg mb-4">{caller}</span>
-              </>        
-            ) : (
-              <div className="flex flex-col justify-center items-center">
-                <img
-                  src="https://w0.peakpx.com/wallpaper/416/423/HD-wallpaper-devil-boy-in-mask-red-hoodie-dark-background-4ef517.jpg"
-                  className="rounded-lg"
-                  alt="User Avatar"
-                  style={{ width: "400px", height: "400px" }}
-                />
-                {/* <div className="info-person2 flex items-center justify-center my-2">
-                  <div className="mr-2">
-                    <img src={user?.avatar_url ? user.avatar_url : "/social-media.png"} alt="icon" width={36} height={36}></img>
-                  </div>
-                  <span>{callingUser || 'Đang tìm kiếm'}</span>
-                </div> */}
-                <span className="text-red-500 font-bold text-lg">{idToCall}</span>
-              </div>
-            )}
+          <div id="videos">
+            <div id="self">
+              <video
+                className="video-player"
+                id="video-self"
+                autoPlay
+                playsInline
+                muted
+                ref={videoSelfRef}
+              ></video>
+            </div>
+            <div id="peer">
+              <video
+                className="video-player"
+                id="video-peer"
+                autoPlay
+                playsInline
+                ref={videoPeerRef}
+              ></video>
+              <div id="peer-video-loader" ref={loaderRef}></div>
+            </div>
           </div>
-        </div>
-        <textarea 
-          className="text-black"
-          value={idToCall}
-          onChange={(e) => {
-            setIdToCall(e.target.value);}}
-        />
-        <div>
-          {callAccepted && !callEnded ? (
-            <button className="text-white hover:text-blue-100 font-bold rounded-md m-4 px-2 bg-[#D57658]" onClick={leaveCall}>
-              Stop
+          <div className="btn-action">
+            <button ref={nextButtonRef} onClick={handleNext} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:bg-gray-400 disabled:cursor-not-allowed">
+              Next
             </button>
-          ) : (
-            <button
-              className="text-white hover:text-blue-100 font-bold rounded-md m-4 px-2 bg-[#50B58D]"
-              onClick={() => callUser(idToCall)}
-            >
+            <button ref={startButtonRef} onClick={handleStart} className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:bg-gray-400 disabled:cursor-not-allowed">
               Start
             </button>
-          )}
-        </div>
-        <div className="text-red-500">
-          {receivingCall && !callAccepted ? (
-            <div className="caller flex flex-col">
-              <h1 className="text-red-500">{caller} is calling...</h1>
-              <button
-                className="text-black text-xl hover:text-gray-400 mr-6 font-bold bg-white rounded-md m-4 px-2"
-                onClick={answerCall}
-              >
-                Answer
-              </button>
-            </div>
-          ) : null}
+            <button ref={stopButtonRef} onClick={handleStop} className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:bg-gray-400 disabled:cursor-not-allowed">
+              Stop
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  };
 
-export default VideoCall;
-
+  export default VideoCall;

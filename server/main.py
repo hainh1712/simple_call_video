@@ -27,7 +27,6 @@ from typing import List
 
 load_dotenv('.env')
 
-
 app = FastAPI()
 
 # to avoid csrftokenError

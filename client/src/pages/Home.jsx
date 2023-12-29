@@ -211,6 +211,22 @@ const Home = () => {
   const handleSortClick = (criteria) => {
     setSortCriteria(criteria);
   };
+
+  const countVote = (post) => {
+    if(!post) return 0;
+
+    let count = 0;
+
+    post.post_vote.forEach(item => {
+      if(item.downvote === 1) count = count - 1
+      if(item.downvote === 0) count = count + 1
+    })
+    
+    return count
+  }
+
+  console.log(posts);
+
   const sortPosts = (posts) => {
     const filteredPosts = posts?.filter(post => post.is_deleted != true);
     const searchFilter = (post) => {
@@ -224,9 +240,15 @@ const Home = () => {
     const searchFilteredPosts = filteredPosts.filter(searchFilter);
     // const searchFilteredPosts = posts.filter(searchFilter);
     switch (sortCriteria) {
-      case "best":
-        return searchFilteredPosts.sort((a, b) => b.id - a.id);
       case "hot":
+        const today = new Date();
+        const temp = searchFilteredPosts.filter(item => {
+          const createdAt = new Date(item.created_at);
+          return createdAt.getDate() === today.getDate() && createdAt.getMonth() === today.getMonth();
+        });
+
+        return temp.sort((a, b) => countVote(b) - countVote(a));
+      case "best":
         return searchFilteredPosts.sort((a, b) => b.post_vote?.length - a.post_vote?.length);
       case "new":
         return searchFilteredPosts.sort(
@@ -253,7 +275,7 @@ const Home = () => {
   return (
     <div className="h-screen w-screen bg-gray-100 overflow-y-auto ">
       <Header onSearch={handleSearch}/>
-      <div className="w-3/5 flex mt-4 mx-auto">
+      <div className="w-screen flex mt-4 mx-auto justify-center">
         <div className="main-view-page w-2/3 mr-10">
           <div className="sticky top-[56px] z-10">
             <div className="h-14 bg-white p-2 border border-gray-100 flex rounded backdrop-blur-[4px]" style={{backgroundColor: 'rgba(255,255,255,0.8)'}}>
@@ -274,6 +296,17 @@ const Home = () => {
           <div className="filter sticky top-[112px] z-10">
             <div className=" bg-white py-2 border border-gray-100 flex rounded backdrop-blur-[4px]" style={{backgroundColor: 'rgba(255,255,255,0.8)'}}>
               <div className="flex ml-10">
+              <div className="mr-2">
+                  <button
+                    className={`flex items-center justify-center ${
+                      sortCriteria === "new" ? "bg-[#eeeeee]" : ""
+                    }`}
+                    onClick={() => handleSortClick("new")}
+                  >
+                    <img src="/thunder.png" alt="" className="mr-2"></img>
+                    New
+                  </button>
+                </div>
                 <div className="mr-2">
                   <button
                     className={`flex items-center justify-center ${
@@ -296,17 +329,6 @@ const Home = () => {
                     Hot
                   </button>
                 </div>
-                <div className="mr-2">
-                  <button
-                    className={`flex items-center justify-center ${
-                      sortCriteria === "new" ? "bg-[#eeeeee]" : ""
-                    }`}
-                    onClick={() => handleSortClick("new")}
-                  >
-                    <img src="/thunder.png" alt="" className="mr-2"></img>
-                    New
-                  </button>
-                </div>
                 <div>
                   <button
                     className={`flex items-center justify-center ${
@@ -323,36 +345,38 @@ const Home = () => {
           {sortedPosts.map((post) => (
             <div key={post.id} className="post-view bg-white mt-4">
               <div className="p-4 pb-4">
-                <div className="header-post flex items-center">
-                  <div className="user-icon mr-2">
-                    <img
-                      // src="/social-media.png"
-                      src={post.user?.avatar_url ? post.user.avatar_url : "/social-media.png"}
-                      alt=""
-                      width={20}
-                      height={20}
-                    ></img>
-                  </div>
-                  <div className="user-name font-medium text-base mr-2">
-                    <div>{post.user.name}</div>
-                  </div>
-                  <div className="time-post font-light text-xs mr-2">
-                    {/* <div>Posted at {post.created_at}</div> */}
-                    <div>
-                      Posted at {formatDistanceToNow(new Date(post.created_at))}{" "}
-                      ago
+                <div className="header-post flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="user-icon mr-2">
+                      <img
+                        // src="/social-media.png"
+                        src={post.user?.avatar_url ? post.user.avatar_url : "/social-media.png"}
+                        alt=""
+                        width={40}
+                        height={40}
+                      ></img>
                     </div>
-                  </div>
-                  <div className="post-tag flex mr-2">
-                    {post.post_tag?.map((tag) => (
-                      <div
-                        key={tag.id}
-                        className="tag text-xs mr-1 border border-gray-200 p-1 rounded-lg bg-neutral-700 text-white font-bold"
-                        style={{ backgroundColor: tagColors[tag.tag.id] }}
-                      >
-                        {tag.tag.name}
+                    <div className="user-name font-medium text-lg mr-2">
+                      <div>{post.user.name}</div>
+                    </div>
+                    <div className="time-post font-light text-xs mr-2">
+                      {/* <div>Posted at {post.created_at}</div> */}
+                      <div>
+                        Posted at {formatDistanceToNow(new Date(post.created_at))}{" "}
+                        ago
                       </div>
-                    ))}
+                    </div>
+                    <div className="post-tag flex mr-2">
+                      {post.post_tag?.map((tag) => (
+                        <div
+                          key={tag.id}
+                          className="tag text-xs mr-1 border border-gray-200 p-1 rounded-lg bg-neutral-700 text-white font-bold"
+                          style={{ backgroundColor: tagColors[tag.tag.id] }}
+                        >
+                          {tag.tag.name}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                   <div className="flex">
                     {isLoggedIn && post.user_id === user?.id && (
@@ -414,13 +438,13 @@ const Home = () => {
                       <DownCircleOutlined />
                     </button>
                   </div>
-                  <div className="w-[85%]">
-                    <div className="post-title font-bold mb-1">
+                  <div className="w-[90%]">
+                    <div className="post-title font-bold text-4xl mb-1 break-words">
                       {post.title}
                     </div>
-                    <div className="description mb-1">{post.description}</div>
+                    <div className="description mb-1 max-w-full">{post.description}</div>
                     <div className="image mb-1 w-full">
-                      {post.image_url && <img src={post.image_url} alt="" className="h-[200px] w-[300px] object-scale-down"/>}
+                      {post.image_url && <img src={post.image_url} alt="" className="w-full"/>}
                     </div>
                     <div className="comment flex">
                       <img src="/cmt.png" alt=""></img>
@@ -431,7 +455,7 @@ const Home = () => {
                   </div>
                 </div>
                 <div className="comment-post flex mt-2">
-                  <div className="border-l-2 border-gray-400">
+                  <div className="border-l-2 border-gray-400 w-full">
                     {post.comments?.length > 0 && (
                     <div className="h-20 overflow-y-auto">
                       {post.comments?.map((comment) => (
@@ -482,7 +506,7 @@ const Home = () => {
                       <input
                         type="text"
                         key={post.id}
-                        className="p-1 border border-gray-400 ml-2 rounded-lg w-[60vh]"
+                        className="p-1 border border-gray-400 ml-2 rounded-lg w-[60vh] flex-1"
                         placeholder="Send message"
                         id={post.id}
                         value={contentMap[post.id] || ""}
@@ -502,7 +526,7 @@ const Home = () => {
             </div>
           ))}
         </div>
-        <div className="recent-post w-1/3 bg-white p-4 sticky top-[72px] h-min">
+        {/* <div className="recent-post w-1/3 bg-white p-4 sticky top-[72px] h-min">
           <div>
             <p className="font-bold text-black">RECENT POST</p>
           </div>
@@ -553,7 +577,7 @@ const Home = () => {
               )))}
             </div>
           )}
-        </div>
+        </div> */}
       </div>
     </div>
   );
