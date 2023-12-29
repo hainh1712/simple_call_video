@@ -178,7 +178,7 @@ const CreatePost = () => {
               type="text" className="w-full border border-gray-300 flex items-center p-2 rounded-lg h-[90%]" required></textarea>
           </div>
           <div className="mb-1">
-            <span>Image</span>
+            <span>Image</span><span className="text-red-600 ml-1">*</span>
             <div className="">
               <div className="flex flex-col items-start overflow-auto">
                 <input
